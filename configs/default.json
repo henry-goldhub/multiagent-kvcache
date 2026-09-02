@@ -1,0 +1,22 @@
+{
+  "cache_policy": "cross_model",
+  "seed": 42,
+  "device": "auto",
+  "max_new_tokens": 96,
+  "step_assignments": [
+    ["model_1", "model_1", "model_1"],
+    ["model_2", "model_2", "model_2"],
+    ["model_3", "model_3", "model_3"],
+    ["model_1", "model_2", "model_3"]
+  ],
+  "adapter": {
+    "type": "ridge",
+    "artifact_dir": "artifacts/adapters",
+    "ridge_lambda": 0.001
+  },
+  "degradation": {
+    "metric": "mean_kl",
+    "threshold": 0.15,
+    "probe_tokens": 8
+  }
+}

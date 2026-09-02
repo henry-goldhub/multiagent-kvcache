@@ -170,9 +170,20 @@ def dynamic_cache_from_layers(layers: Iterable[LayerKV], config: Any) -> Any:
     This helper is intentionally lazy-imported so cache-shape unit tests do not
     require a particular Transformers cache class at import time.
     """
+    import inspect
+
     from transformers import DynamicCache
 
-    cache = DynamicCache(config=config)
+    parameters = inspect.signature(DynamicCache).parameters
+    if "config" in parameters:
+        try:
+            cache = DynamicCache(config=config)
+        except (AttributeError, TypeError, ValueError):
+            # Minimal/custom model configs can describe cache dimensions without
+            # implementing the full PreTrainedConfig protocol expected by 5.x.
+            cache = DynamicCache()
+    else:
+        cache = DynamicCache()
     for layer_index, layer in enumerate(layers):
         cache.update(layer.key, layer.value, layer_index)
     return cache

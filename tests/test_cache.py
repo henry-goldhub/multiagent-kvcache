@@ -2,9 +2,12 @@ from types import SimpleNamespace
 
 import torch
 
+from kvbridge.adapter import AdaptedCache, KVAdapter
 from kvbridge.cache import is_exact_token_prefix
+from kvbridge.compat import forward_with_cache
 from kvbridge.models import ModelBundle
 from kvbridge.pipeline import Pipeline
+from kvbridge.synthetic import synthetic_models
 
 
 def test_exact_token_prefix():
@@ -23,6 +26,28 @@ class CharacterTokenizer:
 
     def decode(self, token_ids, skip_special_tokens=True):
         return "".join(chr(int(token)) for token in token_ids)
+
+
+class NonCompositionalTokenizer:
+    """Records special-token handling while deliberately ignoring text composition."""
+
+    eos_token_id = None
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, text, return_tensors, add_special_tokens=True):
+        self.calls.append((text, add_special_tokens))
+        # A whole-string encode is intentionally unrelated to concatenated suffix
+        # encodes, like a BPE tokenizer whose boundary merges can change.
+        ids = [2, len(text) % 97] if add_special_tokens else [3, (len(text) * 7) % 97]
+        return SimpleNamespace(
+            input_ids=torch.tensor([ids]),
+            attention_mask=torch.ones((1, len(ids)), dtype=torch.long),
+        )
+
+    def decode(self, token_ids, skip_special_tokens=True, **kwargs):
+        return "A"
 
 
 class RecordingModel(torch.nn.Module):
@@ -68,6 +93,22 @@ def test_same_model_steps_prefill_only_appended_tokens():
         assert call["input_length"] < call["cache_length"]
 
 
+def test_same_model_growth_tokenizes_initial_prompt_once_and_suffixes_without_bos():
+    tokenizer = NonCompositionalTokenizer()
+    pipeline = Pipeline(
+        {"model_1": ModelBundle(model=RecordingModel(), tokenizer=tokenizer, name="model_1")},
+        {"max_new_tokens": 1},
+    )
+
+    pipeline.run("Boundary-sensitive text", ["model_1", "model_1", "model_1"])
+
+    assert [add_special_tokens for _, add_special_tokens in tokenizer.calls] == [
+        True,
+        False,
+        False,
+    ]
+
+
 def test_disabled_policy_never_reuses_cache():
     model = RecordingModel()
     pipeline = Pipeline(
@@ -102,7 +143,7 @@ def test_same_model_only_refuses_model_switches():
     ]
 
 
-def test_cross_model_policy_falls_back_without_adapter():
+def test_cross_model_policy_defaults_to_ridge_and_falls_back_without_calibration():
     first = RecordingModel()
     second = RecordingModel()
     pipeline = Pipeline(
@@ -115,5 +156,88 @@ def test_cross_model_policy_falls_back_without_adapter():
 
     _, logs = pipeline.run("One plus one", ["first", "second", "first"])
 
-    assert logs["steps"][1]["cache_decision"] == "cross_model_adapter_error"
-    assert logs["steps"][1]["fallback_reason"] == "adapter_not_configured"
+    assert logs["steps"][1]["cache_decision"] == "cross_model_adapter_fallback"
+    assert logs["steps"][1]["fallback_reason"] == "missing_calibration"
+    assert logs["steps"][1]["adapter_used"]
+
+
+def test_cross_model_success_forwards_only_the_unmatched_target_suffix():
+    pipeline = Pipeline(
+        synthetic_models(),
+        {
+            "cache_policy": "cross_model",
+            "max_new_tokens": 1,
+            "adapter": {"type": "shape_only", "allow_uncalibrated": True},
+        },
+    )
+
+    _, logs = pipeline.run("One plus one", ["model_1", "model_2", "model_3"])
+
+    for step in logs["steps"][1:]:
+        assert step["cache_decision"] == "cross_model_adapter_hit"
+        assert step["adapter_accepted"]
+        assert step["prefill_input_tokens"] < step["prompt_tokens"]
+
+
+class HighScoreAdapter(KVAdapter):
+    def adapt(
+        self,
+        source_cache,
+        source_config,
+        target_config,
+        target_model_name,
+        *,
+        target_token_ids,
+        target_attention_mask,
+    ):
+        return AdaptedCache(
+            past_key_values=source_cache.past_key_values,
+            source_model=source_cache.model_name,
+            target_model=target_model_name,
+            transferred_tokens=target_token_ids.shape[-1],
+            target_token_ids=target_token_ids,
+            target_attention_mask=target_attention_mask,
+            layer_mapping=(),
+            source_layout=SimpleNamespace(),
+            target_layout=None,
+            accepted=True,
+            degradation_score=0.5,
+        )
+
+
+def test_runtime_threshold_forces_a_logged_cold_fallback():
+    first = RecordingModel()
+    second = RecordingModel()
+    pipeline = Pipeline(
+        {
+            "first": ModelBundle(model=first, tokenizer=CharacterTokenizer(), name="first-model"),
+            "second": ModelBundle(model=second, tokenizer=CharacterTokenizer(), name="second-model"),
+        },
+        {
+            "cache_policy": "cross_model",
+            "max_new_tokens": 1,
+            "adapter": HighScoreAdapter(),
+            "degradation": {"threshold": 0.15},
+        },
+    )
+
+    _, logs = pipeline.run("One plus one", ["first", "second", "second"])
+
+    switched = logs["steps"][1]
+    assert switched["cache_decision"] == "cross_model_quality_fallback"
+    assert switched["fallback_reason"] == "runtime_degradation_threshold_exceeded"
+    assert switched["cold_prefill"]
+
+
+def test_compatibility_wrapper_omits_unsupported_cache_position():
+    class StrictModel:
+        def forward(self, input_ids, use_cache=True):
+            return input_ids
+
+        __call__ = forward
+
+    ids = torch.tensor([[1]])
+    assert torch.equal(
+        forward_with_cache(StrictModel(), input_ids=ids, use_cache=True, cache_position=ids),
+        ids,
+    )

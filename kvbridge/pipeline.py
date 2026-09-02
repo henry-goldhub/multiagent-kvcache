@@ -1,4 +1,4 @@
-"""The three-stage append-only inference pipeline."""
+"""Three-stage append-only inference with exact and adapted cache reuse."""
 
 from __future__ import annotations
 
@@ -8,26 +8,50 @@ from typing import Any, ClassVar
 
 import torch
 
-from .adapter import KVAdapter, UnsupportedAdapter
-from .cache import CacheState, is_exact_token_prefix
+from .adapter import AdapterError, KVAdapter, build_adapter
+from .cache import CacheState
+from .compat import (
+    eos_token_ids,
+    forward_with_cache,
+    model_input_device,
+    synchronize,
+    timed_forward,
+)
 from .models import ModelBundle
-from .prompts import append_step, build_initial_prompt
+from .prompts import PromptState
 
 
 class Pipeline:
-    """Run extract → plan → compute with same-model cache reuse where possible."""
+    """Run extract → plan → compute with exact or experimental cache reuse."""
 
     VALID_CACHE_POLICIES: ClassVar[set[str]] = {"disabled", "same_model_only", "cross_model"}
 
     def __init__(self, models: dict[str, ModelBundle], config: dict[str, Any] | None = None):
         self.models = models
         self.config = config or {}
+        requested_device = self.config.get("device", "auto")
+        if requested_device != "auto":
+            device = torch.device(requested_device)
+            for bundle in self.models.values():
+                device_map = getattr(bundle.model, "hf_device_map", None)
+                if device_map and len({str(value) for value in device_map.values()}) > 1:
+                    raise ValueError(
+                        "An explicit device cannot be applied to a model sharded by device_map; "
+                        "use device='auto'"
+                    )
+                bundle.model.to(device)
         self.cache_policy = self.config.get("cache_policy", "same_model_only")
         if self.cache_policy not in self.VALID_CACHE_POLICIES:
             allowed = ", ".join(sorted(self.VALID_CACHE_POLICIES))
             raise ValueError(f"cache_policy must be one of: {allowed}")
-        self.adapter: KVAdapter = self.config.get("adapter", UnsupportedAdapter())
+        adapter_config = self.config.get("adapter")
+        if adapter_config is None and self.cache_policy == "cross_model":
+            adapter_config = {"type": "ridge"}
+        self.adapter: KVAdapter = build_adapter(adapter_config)
         self.seed = int(self.config.get("seed", 42))
+        self.degradation_threshold = float(
+            self.config.get("degradation", {}).get("threshold", 0.15)
+        )
 
     def run(self, task_input: str, step_assignment: list[str]) -> tuple[str, dict[str, Any]]:
         if len(step_assignment) != 3:
@@ -37,46 +61,120 @@ class Pipeline:
 
         random.seed(self.seed)
         torch.manual_seed(self.seed)
-        prompt = build_initial_prompt(task_input)
+        prompt = PromptState.from_question(task_input)
         previous_cache: CacheState | None = None
         outputs: list[str] = []
         logs: dict[str, Any] = {"steps": []}
 
         for step_index, model_name in enumerate(step_assignment):
             bundle = self.models[model_name]
-            output, cache, step_log = self._run_step(bundle, prompt, previous_cache)
-            outputs.append(output)
+            raw_output, cache, step_log = self._run_step(bundle, prompt, previous_cache)
+            outputs.append(raw_output.strip())
             logs["steps"].append(step_log)
-            prompt = append_step(prompt, output, step_index + 1 if step_index < 2 else None)
+            prompt = prompt.after_output(raw_output, step_index + 1 if step_index < 2 else None)
             previous_cache = cache
 
-        logs["final_prompt"] = prompt
+        logs["final_prompt"] = prompt.text
         return outputs[-1], logs
 
-    def _run_step(
-        self,
-        bundle: ModelBundle,
-        prompt: str,
-        previous_cache: CacheState | None,
-    ) -> tuple[str, CacheState, dict[str, Any]]:
-        tokenizer = bundle.tokenizer
-        model = bundle.model
-        device = next(model.parameters()).device
-        encoded = tokenizer(prompt, return_tensors="pt")
+    @staticmethod
+    def _tokenize(
+        tokenizer: Any,
+        text: str,
+        device: torch.device,
+        *,
+        add_special_tokens: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        try:
+            encoded = tokenizer(
+                text,
+                return_tensors="pt",
+                add_special_tokens=add_special_tokens,
+            )
+        except TypeError:
+            encoded = tokenizer(text, return_tensors="pt")
         input_ids = encoded.input_ids.to(device)
         attention_mask = getattr(encoded, "attention_mask", None)
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids)
+        return input_ids, attention_mask.to(device)
+
+    @staticmethod
+    def _decode(tokenizer: Any, token_ids: torch.Tensor) -> str:
+        try:
+            return tokenizer.decode(
+                token_ids,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )
+        except TypeError:
+            return tokenizer.decode(token_ids, skip_special_tokens=True)
+
+    def _step_tokens(
+        self,
+        bundle: ModelBundle,
+        prompt: PromptState,
+        previous_cache: CacheState | None,
+        device: torch.device,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        """Return logical full tokens plus separately encoded prefix/suffix."""
+        if previous_cache is None:
+            full_ids, full_mask = self._tokenize(
+                bundle.tokenizer, prompt.text, device, add_special_tokens=True
+            )
+            return full_ids, full_mask, None, None
+
+        suffix_text = prompt.suffix_text
+        if suffix_text is None or not prompt.text.startswith(previous_cache.prompt_text):
+            full_ids, full_mask = self._tokenize(
+                bundle.tokenizer, prompt.text, device, add_special_tokens=True
+            )
+            return full_ids, full_mask, None, None
+        suffix_ids, suffix_mask = self._tokenize(
+            bundle.tokenizer, suffix_text, device, add_special_tokens=False
+        )
+        if previous_cache.model_name == bundle.name:
+            prefix_ids = previous_cache.token_ids.to(device)
+            prefix_mask = previous_cache.attention_mask
+            if prefix_mask is None:
+                prefix_mask = torch.ones_like(prefix_ids)
+            else:
+                prefix_mask = prefix_mask.to(device)
         else:
-            attention_mask = attention_mask.to(device)
-        use_same_model_cache = previous_cache is not None and previous_cache.model_name == bundle.name
+            prefix_ids, prefix_mask = self._tokenize(
+                bundle.tokenizer,
+                previous_cache.prompt_text,
+                device,
+                add_special_tokens=True,
+            )
+        return (
+            torch.cat((prefix_ids, suffix_ids), dim=-1),
+            torch.cat((prefix_mask, suffix_mask), dim=-1),
+            prefix_ids,
+            suffix_ids,
+        )
+
+    def _run_step(
+        self,
+        bundle: ModelBundle,
+        prompt: PromptState,
+        previous_cache: CacheState | None,
+    ) -> tuple[str, CacheState, dict[str, Any]]:
+        tokenizer = bundle.tokenizer
+        model = bundle.model
+        device = model_input_device(model)
+        input_ids, attention_mask, prefix_ids, suffix_ids = self._step_tokens(
+            bundle, prompt, previous_cache, device
+        )
+        same_model = previous_cache is not None and previous_cache.model_name == bundle.name
         cache_hit_tokens = 0
         cold_prefill = True
         adapter_used = False
+        adapter_accepted = False
         adapter_seconds = 0.0
         quality_gate_seconds = 0.0
         fallback_reason: str | None = None
-        cache_decision = "initial_cold_prefill" if previous_cache is None else ""
+        cache_decision = "initial_cold_prefill" if previous_cache is None else "policy_disabled"
         model_inputs: dict[str, Any] = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -84,75 +182,98 @@ class Pipeline:
             "cache_position": torch.arange(input_ids.shape[-1], device=device),
         }
 
-        if self.cache_policy == "disabled" and previous_cache is not None:
-            cache_decision = "policy_disabled"
-        elif use_same_model_cache and is_exact_token_prefix(previous_cache.token_ids, input_ids):
-            cache_hit_tokens = previous_cache.token_count
-            model_inputs["input_ids"] = input_ids[:, cache_hit_tokens:]
-            model_inputs["past_key_values"] = previous_cache.past_key_values
-            # For cached forwards, Hugging Face requires an attention mask
-            # covering both past and newly supplied tokens. cache_position is
-            # absolute and begins after the prior completed prompt/response.
-            start_position = previous_cache.next_cache_position or cache_hit_tokens
-            suffix_length = model_inputs["input_ids"].shape[-1]
-            model_inputs["cache_position"] = torch.arange(
-                start_position, start_position + suffix_length, device=device
-            )
-            cold_prefill = False
-            cache_decision = "same_model_hit"
-        elif use_same_model_cache:
-            cache_decision = "same_model_prefix_mismatch"
-        elif previous_cache is not None and self.cache_policy == "same_model_only":
-            cache_decision = "cross_model_not_allowed"
-        elif previous_cache is not None and self.cache_policy == "cross_model":
-            started = time.perf_counter()
-            try:
-                self.adapter.adapt(
-                    previous_cache, previous_cache.model_config, model.config, bundle.name
+        if previous_cache is not None and self.cache_policy != "disabled":
+            if same_model and prefix_ids is not None and suffix_ids is not None:
+                cache_hit_tokens = int(prefix_ids.shape[-1])
+                model_inputs["input_ids"] = suffix_ids
+                model_inputs["past_key_values"] = previous_cache.past_key_values
+                model_inputs["cache_position"] = torch.arange(
+                    cache_hit_tokens,
+                    cache_hit_tokens + suffix_ids.shape[-1],
+                    device=device,
                 )
+                cold_prefill = False
+                cache_decision = "same_model_hit"
+            elif same_model:
+                cache_decision = "same_model_prefix_mismatch"
+                fallback_reason = "prompt_not_append_only"
+            elif self.cache_policy == "same_model_only":
+                cache_decision = "cross_model_not_allowed"
+            elif self.cache_policy == "cross_model" and prefix_ids is not None and suffix_ids is not None:
+                started = time.perf_counter()
                 adapter_used = True
-                # An adapted cache must first state which *target tokenizer*
-                # positions it covers and pass a continuation quality gate.
-                # Until that interface exists, safely use the cold baseline.
-                cache_decision = "cross_model_quality_fallback"
-                fallback_reason = "quality_gate_unavailable"
-            except NotImplementedError:
-                cache_decision = "cross_model_adapter_error"
-                fallback_reason = "adapter_not_configured"
-            adapter_seconds = time.perf_counter() - started
+                try:
+                    adapted = self.adapter.adapt(
+                        previous_cache,
+                        previous_cache.model_config,
+                        model.config,
+                        bundle.name,
+                        target_token_ids=prefix_ids,
+                        target_attention_mask=attention_mask[:, : prefix_ids.shape[-1]],
+                    )
+                    gate_started = time.perf_counter()
+                    runtime_accepted = adapted.accepted
+                    if (
+                        adapted.degradation_score is not None
+                        and adapted.degradation_score > self.degradation_threshold
+                    ):
+                        runtime_accepted = False
+                        adapted.rejection_reason = "runtime_degradation_threshold_exceeded"
+                    quality_gate_seconds = time.perf_counter() - gate_started
+                    adapter_accepted = runtime_accepted
+                    if runtime_accepted and adapted.past_key_values is not None:
+                        cache_hit_tokens = adapted.transferred_tokens
+                        model_inputs["input_ids"] = suffix_ids
+                        model_inputs["past_key_values"] = adapted.past_key_values
+                        model_inputs["cache_position"] = torch.arange(
+                            cache_hit_tokens,
+                            cache_hit_tokens + suffix_ids.shape[-1],
+                            device=device,
+                        )
+                        cold_prefill = False
+                        cache_decision = "cross_model_adapter_hit"
+                    else:
+                        cache_decision = "cross_model_quality_fallback"
+                        fallback_reason = adapted.rejection_reason or "quality_gate_rejected"
+                except AdapterError as error:
+                    cache_decision = "cross_model_adapter_fallback"
+                    fallback_reason = str(error)
+                except Exception as error:  # noqa: BLE001 - mandatory safety boundary
+                    cache_decision = "cross_model_adapter_fallback"
+                    fallback_reason = f"adapter_runtime_error:{type(error).__name__}"
+                finally:
+                    adapter_seconds = time.perf_counter() - started
+            else:
+                cache_decision = "cross_model_prefix_mismatch"
+                fallback_reason = "prompt_not_append_only"
 
-        prefill_started = time.perf_counter()
-        with torch.inference_mode():
-            outputs = model(**model_inputs)
-        prefill_seconds = time.perf_counter() - prefill_started
-
-        decode_started = time.perf_counter()
-        text, generated_ids, completed_cache = self._greedy_decode(
+        prefill = timed_forward(model, device, **model_inputs)
+        outputs = prefill.output
+        raw_text, generated_ids, completed_cache, decode_seconds = self._greedy_decode(
             model=model,
             tokenizer=tokenizer,
             first_outputs=outputs,
             max_new_tokens=int(self.config.get("max_new_tokens", 96)),
             attention_mask=attention_mask,
             initial_cache_position=int(input_ids.shape[-1]),
+            device=device,
         )
-        decode_seconds = time.perf_counter() - decode_started
-        # The cache must include the generated answer.  That makes the next
-        # append-only prompt's token IDs start with ``cache.token_ids``.
         complete_token_ids = torch.cat((input_ids, generated_ids), dim=-1)
+        complete_attention_mask = torch.cat(
+            (attention_mask, torch.ones_like(generated_ids, device=device)), dim=-1
+        )
         cache = CacheState(
             model_name=bundle.name,
             token_ids=complete_token_ids,
-            prompt_text=f"{prompt}{text}",
+            prompt_text=f"{prompt.text}{raw_text}",
             past_key_values=completed_cache,
             model_config=model.config,
-            attention_mask=torch.cat(
-                (attention_mask, torch.ones_like(generated_ids, device=device)), dim=-1
-            ),
-            next_cache_position=int(input_ids.shape[-1] + generated_ids.shape[-1]),
+            attention_mask=complete_attention_mask,
+            next_cache_position=int(complete_token_ids.shape[-1]),
         )
         log = {
             "model": bundle.name,
-            "prefill_seconds": prefill_seconds,
+            "prefill_seconds": prefill.seconds,
             "decode_seconds": decode_seconds,
             "adapter_seconds": adapter_seconds,
             "quality_gate_seconds": quality_gate_seconds,
@@ -162,20 +283,11 @@ class Pipeline:
             "cache_policy": self.cache_policy,
             "cache_decision": cache_decision,
             "adapter_used": adapter_used,
+            "adapter_accepted": adapter_accepted,
             "cold_prefill": cold_prefill,
             "fallback_reason": fallback_reason,
         }
-        return text, cache, log
-
-    @staticmethod
-    def _eos_token_ids(tokenizer: Any) -> set[int]:
-        """Normalize Transformers' scalar/list EOS configuration."""
-        eos = getattr(tokenizer, "eos_token_id", None)
-        if eos is None:
-            return set()
-        if isinstance(eos, int):
-            return {eos}
-        return set(eos)
+        return raw_text, cache, log
 
     def _greedy_decode(
         self,
@@ -185,36 +297,32 @@ class Pipeline:
         max_new_tokens: int,
         attention_mask: torch.Tensor,
         initial_cache_position: int,
-    ) -> tuple[str, torch.Tensor, Any]:
-        """Greedily decode while retaining a cache for every emitted token.
-
-        ``first_outputs`` comes from a full prefill (or a cached suffix
-        prefill).  Its final logits predict the first generated token.  Each
-        subsequent forward pass receives exactly one new token and the prior
-        cache, so it never recomputes attention for the growing response.
-        A final one-token forward appends the last emitted token to the cache;
-        this is what makes that cache reusable by the following pipeline step.
-        """
+        device: torch.device,
+    ) -> tuple[str, torch.Tensor, Any, float]:
         if max_new_tokens <= 0:
             empty = torch.empty((1, 0), dtype=torch.long, device=first_outputs.logits.device)
-            return "", empty, first_outputs.past_key_values
+            return "", empty, first_outputs.past_key_values, 0.0
 
-        eos_token_ids = self._eos_token_ids(tokenizer)
+        stop_ids = eos_token_ids(model, tokenizer)
         generated: list[torch.Tensor] = []
         outputs = first_outputs
         current_attention_mask = attention_mask
         completed_outputs = first_outputs
+        synchronize(device)
+        started = time.perf_counter()
         for token_index in range(max_new_tokens):
             next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1, keepdim=True)
             generated.append(next_token)
             current_attention_mask = torch.cat(
-                (current_attention_mask, current_attention_mask.new_ones((1, 1))), dim=-1
+                (
+                    current_attention_mask,
+                    current_attention_mask.new_ones((current_attention_mask.shape[0], 1)),
+                ),
+                dim=-1,
             )
-            # Forward every selected token once: this both computes the next
-            # logits and appends the selected token to the cache. The full
-            # attention mask is required to cover past + current KV positions.
             with torch.inference_mode():
-                completed_outputs = model(
+                completed_outputs = forward_with_cache(
+                    model,
                     input_ids=next_token,
                     attention_mask=current_attention_mask,
                     cache_position=torch.tensor(
@@ -223,10 +331,11 @@ class Pipeline:
                     past_key_values=outputs.past_key_values,
                     use_cache=True,
                 )
-            if int(next_token[0, 0]) in eos_token_ids:
+            if int(next_token[0, 0]) in stop_ids:
                 break
             outputs = completed_outputs
-
+        synchronize(device)
+        decode_seconds = time.perf_counter() - started
         generated_ids = torch.cat(generated, dim=-1)
-        text = tokenizer.decode(generated_ids[0], skip_special_tokens=True).strip()
-        return text, generated_ids, completed_outputs.past_key_values
+        raw_text = self._decode(tokenizer, generated_ids[0])
+        return raw_text, generated_ids, completed_outputs.past_key_values, decode_seconds

@@ -10,12 +10,14 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "torch>=2.2",
-    "transformers>=4.45",
+    "transformers>=4.48,<6",
+    "safetensors>=0.4",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 eval = ["datasets>=2.20"]
+full = ["accelerate>=1.0", "bitsandbytes>=0.45"]
 
 [tool.setuptools.packages.find]
 include = ["kvbridge*"]
@@ -23,6 +25,10 @@ include = ["kvbridge*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: downloads lightweight public model weights",
+    "full_models: requires cloud GPU access and the named assignment models",
+]
 
 [tool.ruff]
 line-length = 100
