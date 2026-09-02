@@ -3,6 +3,8 @@
 KVBridge is an experimental Python package for reuse of Hugging Face KV caches
 in append-only multi-step language-model pipelines.
 
+The original assignment requirements are preserved in [TASK_SPEC.md](TASK_SPEC.md).
+
 ## Current status
 
 This repository currently contains an installable package, append-only GSM8K
