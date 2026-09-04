@@ -1,0 +1,7 @@
+{
+  "complete": true,
+  "completed_pairs": [
+    "model_1 -> model_2",
+    "model_2 -> model_3"
+  ]
+}

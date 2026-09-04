@@ -1,0 +1,59 @@
+{
+  "question": "Jared is trying to increase his typing speed. He starts with 47 words per minute (WPM). After some lessons the next time he tests his typing speed it has increased to 52 WPM. If he continues to increase his typing speed once more by 5 words, what will be the average of the three measurements?",
+  "gold_answer": "Jared types at 52 WPM and increases it by 5 WPM, 52 + 5 = <<52+5=57>>57 WPM.\nHis average over all his measured words-per-minute is 47 + 52 + 57 = <<47+52+57=156>>156.\nHis total is 156 / 3 typing speeds = <<156/3=52>>52 WPM as Jared's average typing speed.\n#### 52",
+  "prediction": "- The average of the three measurements is 54 WPM.\n\nThe final answer is \\boxed{54}.",
+  "logs": {
+    "steps": [
+      {
+        "model": "model_1",
+        "prefill_seconds": 0.8418044179998105,
+        "decode_seconds": 8.94250866199991,
+        "adapter_seconds": 0.0,
+        "quality_gate_seconds": 0.0,
+        "cache_hit_tokens": 0,
+        "prompt_tokens": 86,
+        "prefill_input_tokens": 86,
+        "cache_policy": "cross_model",
+        "cache_decision": "initial_cold_prefill",
+        "adapter_used": false,
+        "adapter_accepted": false,
+        "cold_prefill": true,
+        "fallback_reason": null
+      },
+      {
+        "model": "model_2",
+        "prefill_seconds": 1.6273957319999681,
+        "decode_seconds": 8.562573913000051,
+        "adapter_seconds": 0.005810466000184533,
+        "quality_gate_seconds": 1.666000116529176e-06,
+        "cache_hit_tokens": 0,
+        "prompt_tokens": 218,
+        "prefill_input_tokens": 218,
+        "cache_policy": "cross_model",
+        "cache_decision": "cross_model_quality_fallback",
+        "adapter_used": true,
+        "adapter_accepted": false,
+        "cold_prefill": true,
+        "fallback_reason": "runtime_degradation_threshold_exceeded"
+      },
+      {
+        "model": "model_3",
+        "prefill_seconds": 1.2776735319998807,
+        "decode_seconds": 1.9161785890000829,
+        "adapter_seconds": 0.0038918279997233185,
+        "quality_gate_seconds": 9.919999683916103e-07,
+        "cache_hit_tokens": 0,
+        "prompt_tokens": 340,
+        "prefill_input_tokens": 340,
+        "cache_policy": "cross_model",
+        "cache_decision": "cross_model_quality_fallback",
+        "adapter_used": true,
+        "adapter_accepted": false,
+        "cold_prefill": true,
+        "fallback_reason": "runtime_degradation_threshold_exceeded"
+      }
+    ],
+    "final_prompt": "Question: Jared is trying to increase his typing speed. He starts with 47 words per minute (WPM). After some lessons the next time he tests his typing speed it has increased to 52 WPM. If he continues to increase his typing speed once more by 5 words, what will be the average of the three measurements?\n\nStep 1 \u2014 Extract: List the quantities and variables stated in the problem.\n- Initial typing speed: 47 WPM\n- Second typing speed after lessons: 55 WPM\n- Third typing speed increase: 5 WPM\n\nStep 2 \u2014 Calculate the third typing speed.\n- Third typing speed = 55 WPM + 5 WPM = 60 WPM\n\nStep 4 \u2014 Calculate the average of the three measurements.\n- Average = (47 WPM + 55 WPM + 6\n\nStep 2 \u2014 Plan: Derive the arithmetic expression or equations needed to solve it.\n- Average = (47 WPM + 55 WPM + 60 WPM) / 3\n\nStep 3 \u2014 Solve: Plug in the values and perform the calculations.\n- Average = (47 + 55 + 60) / 3\n- Average = (162) / 3\n- Average = 54 WPM\n\nThe average of the three measurements is 54 W\n\nStep 3 \u2014 Compute: Evaluate the plan and state the final numeric answer.\n- The average of the three measurements is 54 WPM.\n\nThe final answer is \\boxed{54}.\n\n"
+  },
+  "included_in_measured_report": false
+}

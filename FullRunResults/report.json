@@ -1,0 +1,198 @@
+{
+  "seed": 42,
+  "cache_policy": "cross_model",
+  "settings": {
+    "model_1 -> model_1 -> model_1": {
+      "baseline": {
+        "examples": 5,
+        "accuracy": 0.0,
+        "latency_seconds": {
+          "prefill_mean": 1.393897005200021,
+          "prefill_p50": 1.293490722000115,
+          "decode_mean": 8.984005044399904,
+          "decode_p50": 9.016890815999886,
+          "adapter_mean": 0.0,
+          "adapter_p50": 0.0,
+          "quality_gate_mean": 0.0,
+          "total_mean": 31.133706148799774,
+          "total_p50": 30.987824972
+        },
+        "cache_hit_tokens": 0,
+        "cache_hit_rate": 0.0,
+        "adapter_attempt_rate": 0.0,
+        "adapter_accept_rate": 0.0,
+        "adapter_fallback_rate": 0.0,
+        "fallback_rate": 0.0
+      },
+      "cached": {
+        "examples": 5,
+        "accuracy": 0.2,
+        "latency_seconds": {
+          "prefill_mean": 0.573127760266713,
+          "prefill_p50": 0.5008020919999581,
+          "decode_mean": 9.004205816866762,
+          "decode_p50": 9.01186621900024,
+          "adapter_mean": 0.0,
+          "adapter_p50": 0.0,
+          "quality_gate_mean": 0.0,
+          "total_mean": 28.732000731400422,
+          "total_p50": 28.867420459001096
+        },
+        "cache_hit_tokens": 2283,
+        "cache_hit_rate": 0.8047232992597815,
+        "adapter_attempt_rate": 0.0,
+        "adapter_accept_rate": 0.0,
+        "adapter_fallback_rate": 0.0,
+        "fallback_rate": 0.0
+      },
+      "speedup": {
+        "prefill": 2.4320877504718172,
+        "total": 1.083589912162803
+      }
+    },
+    "model_2 -> model_2 -> model_2": {
+      "baseline": {
+        "examples": 5,
+        "accuracy": 0.4,
+        "latency_seconds": {
+          "prefill_mean": 1.5540829805333791,
+          "prefill_p50": 1.6063600719999158,
+          "decode_mean": 8.354086002533283,
+          "decode_p50": 8.564098856999863,
+          "adapter_mean": 0.0,
+          "adapter_p50": 0.0,
+          "quality_gate_mean": 0.0,
+          "total_mean": 29.724506949199984,
+          "total_p50": 30.281625634999273
+        },
+        "cache_hit_tokens": 0,
+        "cache_hit_rate": 0.0,
+        "adapter_attempt_rate": 0.0,
+        "adapter_accept_rate": 0.0,
+        "adapter_fallback_rate": 0.0,
+        "fallback_rate": 0.0
+      },
+      "cached": {
+        "examples": 5,
+        "accuracy": 0.6,
+        "latency_seconds": {
+          "prefill_mean": 0.6374604184000419,
+          "prefill_p50": 0.5189878529999987,
+          "decode_mean": 8.341341481999978,
+          "decode_p50": 8.54891678399963,
+          "adapter_mean": 0.0,
+          "adapter_p50": 0.0,
+          "quality_gate_mean": 0.0,
+          "total_mean": 26.936405701200055,
+          "total_p50": 27.5848005189996
+        },
+        "cache_hit_tokens": 2406,
+        "cache_hit_rate": 0.7852480417754569,
+        "adapter_attempt_rate": 0.0,
+        "adapter_accept_rate": 0.0,
+        "adapter_fallback_rate": 0.0,
+        "fallback_rate": 0.0
+      },
+      "speedup": {
+        "prefill": 2.4379285923884697,
+        "total": 1.103506803354826
+      }
+    },
+    "model_3 -> model_3 -> model_3": {
+      "baseline": {
+        "examples": 5,
+        "accuracy": 0.0,
+        "latency_seconds": {
+          "prefill_mean": 0.8146884224000133,
+          "prefill_p50": 0.8492102770001111,
+          "decode_mean": 4.6345062011333535,
+          "decode_p50": 4.809089010000207,
+          "adapter_mean": 0.0,
+          "adapter_p50": 0.0,
+          "quality_gate_mean": 0.0,
+          "total_mean": 16.3475838706001,
+          "total_p50": 17.364730780999707
+        },
+        "cache_hit_tokens": 0,
+        "cache_hit_rate": 0.0,
+        "adapter_attempt_rate": 0.0,
+        "adapter_accept_rate": 0.0,
+        "adapter_fallback_rate": 0.0,
+        "fallback_rate": 0.0
+      },
+      "cached": {
+        "examples": 5,
+        "accuracy": 0.2,
+        "latency_seconds": {
+          "prefill_mean": 0.3271848454000671,
+          "prefill_p50": 0.26797974900000554,
+          "decode_mean": 4.664612745799968,
+          "decode_p50": 4.772225303999676,
+          "adapter_mean": 0.0,
+          "adapter_p50": 0.0,
+          "quality_gate_mean": 0.0,
+          "total_mean": 14.975392773600106,
+          "total_p50": 15.634736006000821
+        },
+        "cache_hit_tokens": 2378,
+        "cache_hit_rate": 0.785336856010568,
+        "adapter_attempt_rate": 0.0,
+        "adapter_accept_rate": 0.0,
+        "adapter_fallback_rate": 0.0,
+        "fallback_rate": 0.0
+      },
+      "speedup": {
+        "prefill": 2.4899943681800067,
+        "total": 1.0916297233565058
+      }
+    },
+    "model_1 -> model_2 -> model_3": {
+      "baseline": {
+        "examples": 5,
+        "accuracy": 0.0,
+        "latency_seconds": {
+          "prefill_mean": 1.1894134848000248,
+          "prefill_p50": 1.2662127710000277,
+          "decode_mean": 6.817036337733376,
+          "decode_p50": 8.570825229000093,
+          "adapter_mean": 0.0,
+          "adapter_p50": 0.0,
+          "quality_gate_mean": 0.0,
+          "total_mean": 24.019349467600204,
+          "total_p50": 23.403809099000227
+        },
+        "cache_hit_tokens": 0,
+        "cache_hit_rate": 0.0,
+        "adapter_attempt_rate": 0.0,
+        "adapter_accept_rate": 0.0,
+        "adapter_fallback_rate": 0.0,
+        "fallback_rate": 0.0
+      },
+      "cached": {
+        "examples": 5,
+        "accuracy": 0.0,
+        "latency_seconds": {
+          "prefill_mean": 1.190431810333333,
+          "prefill_p50": 1.2712660819997836,
+          "decode_mean": 6.727586717866719,
+          "decode_p50": 8.587221282999963,
+          "adapter_mean": 0.0008304622665794644,
+          "adapter_p50": 0.00042733999998745276,
+          "quality_gate_mean": 6.665333785349503e-07,
+          "total_mean": 23.75654897100003,
+          "total_p50": 23.125596001000304
+        },
+        "cache_hit_tokens": 0,
+        "cache_hit_rate": 0.0,
+        "adapter_attempt_rate": 0.6666666666666666,
+        "adapter_accept_rate": 0.0,
+        "adapter_fallback_rate": 1.0,
+        "fallback_rate": 0.6666666666666666
+      },
+      "speedup": {
+        "prefill": 0.9991445746623463,
+        "total": 1.011062233699052
+      }
+    }
+  }
+}

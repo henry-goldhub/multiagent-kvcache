@@ -1,0 +1,12 @@
+{
+  "complete": true,
+  "completed_assignments": 4,
+  "expected_assignments": 4,
+  "combined_baseline_and_cached_wall_seconds": {
+    "model_1 -> model_1 -> model_1": 299.44384779699976,
+    "model_2 -> model_2 -> model_2": 283.429931487,
+    "model_3 -> model_3 -> model_3": 156.73543077199975,
+    "model_1 -> model_2 -> model_3": 239.0208988909999
+  },
+  "error_type": null
+}

@@ -1,0 +1,57 @@
+{
+  "test": "forced missing-artifact fallback; excluded from measurements",
+  "result": "-",
+  "logs": {
+    "steps": [
+      {
+        "model": "model_1",
+        "prefill_seconds": 0.9102498679999371,
+        "decode_seconds": 0.14638641900000948,
+        "adapter_seconds": 0.0,
+        "quality_gate_seconds": 0.0,
+        "cache_hit_tokens": 0,
+        "prompt_tokens": 86,
+        "prefill_input_tokens": 86,
+        "cache_policy": "cross_model",
+        "cache_decision": "initial_cold_prefill",
+        "adapter_used": false,
+        "adapter_accepted": false,
+        "cold_prefill": true,
+        "fallback_reason": null
+      },
+      {
+        "model": "model_2",
+        "prefill_seconds": 0.8289698090002275,
+        "decode_seconds": 0.0951729879998311,
+        "adapter_seconds": 0.00019310799962113379,
+        "quality_gate_seconds": 0.0,
+        "cache_hit_tokens": 0,
+        "prompt_tokens": 117,
+        "prefill_input_tokens": 117,
+        "cache_policy": "cross_model",
+        "cache_decision": "cross_model_adapter_fallback",
+        "adapter_used": true,
+        "adapter_accepted": false,
+        "cold_prefill": true,
+        "fallback_reason": "missing_calibration"
+      },
+      {
+        "model": "model_3",
+        "prefill_seconds": 0.5906676189997597,
+        "decode_seconds": 0.061686810000082914,
+        "adapter_seconds": 0.0002243359999738459,
+        "quality_gate_seconds": 0.0,
+        "cache_hit_tokens": 0,
+        "prompt_tokens": 138,
+        "prefill_input_tokens": 138,
+        "cache_policy": "cross_model",
+        "cache_decision": "cross_model_adapter_fallback",
+        "adapter_used": true,
+        "adapter_accepted": false,
+        "cold_prefill": true,
+        "fallback_reason": "missing_calibration"
+      }
+    ],
+    "final_prompt": "Question: Jared is trying to increase his typing speed. He starts with 47 words per minute (WPM). After some lessons the next time he tests his typing speed it has increased to 52 WPM. If he continues to increase his typing speed once more by 5 words, what will be the average of the three measurements?\n\nStep 1 \u2014 Extract: List the quantities and variables stated in the problem.\n-\n\nStep 2 \u2014 Plan: Derive the arithmetic expression or equations needed to solve it.\n-\n\nStep 3 \u2014 Compute: Evaluate the plan and state the final numeric answer.\n-"
+  }
+}
