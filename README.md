@@ -66,6 +66,28 @@ The stand-in profile uses Qwen2.5-0.5B-Instruct, SmolLM2-135M-Instruct,
 and DistilGPT2. They are different architectural families and tokenizers, but
 their GSM8K accuracy is not a substitute for the requested 7B-model results.
 
+### Cloud notebook
+
+Use [examples/cloud_run.ipynb](examples/cloud_run.ipynb) in Colab or a GPU-backed
+Jupyter session. Commit and push the latest source first: a cloud clone cannot
+see your uncommitted local changes. Upload the notebook to Colab, select a GPU
+runtime, and run its cells in order. Set `ENABLE_MODEL_DOWNLOADS=True` when
+ready to download pretrained weights and GSM8K.
+
+The default is a five-example stand-in run with 16 fitting and eight validation
+examples per hand-off. It records the source/model revisions and dataset row
+indices, calibrates both pairs, proves a missing-artifact fallback, and evaluates
+all four assignments. Each run gets isolated adapters and checkpointed reports
+under `results/cloud/`; the export cell downloads a ZIP containing results and
+artifacts but no model weights or credentials. Keep the committed notebook
+template output-free and publish measured report files separately.
+
+The full profile is an explicit opt-in. Calibration loads two models at a time;
+mixed evaluation still holds all three models on one GPU, so 4-bit loading does
+not guarantee a fit. The notebook has offline synthetic workflow tests, but
+pretrained cloud results remain unverified until you execute it. Download the
+export before disconnecting the runtime.
+
 ## Configuration
 
 ```python
