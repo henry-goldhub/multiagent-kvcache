@@ -114,6 +114,20 @@ def test_ridge_fit_recovers_known_affine_projection(tmp_path):
     assert loaded.metadata.accepted
 
 
+def test_ridge_fit_handles_ill_conditioned_collinear_activations():
+    # Large, nearly collinear columns make float32 normal equations singular.
+    column = torch.linspace(1_000_000.0, 1_000_100.0, 32).unsqueeze(1)
+    source = torch.cat((column, column, column + 1.0), dim=1)
+    target = torch.cat((source[:, :1] * 0.25 + 2.0, source[:, 1:2] * -0.5), dim=1)
+
+    weight, bias = RidgeKVAdapter._ridge_fit(source, target, 1e-3)
+    predicted = source @ weight + bias
+
+    assert torch.isfinite(weight).all()
+    assert torch.isfinite(bias).all()
+    assert torch.allclose(predicted, target, rtol=1e-4, atol=2.0)
+
+
 def test_quality_gate_rejects_degraded_logits():
     adapter = RidgeKVAdapter()
     projection = adapter.fit_pair(

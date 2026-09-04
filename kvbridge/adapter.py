@@ -290,16 +290,28 @@ class RidgeKVAdapter(KVAdapter):
     def _ridge_fit(
         x: torch.Tensor, y: torch.Tensor, ridge_lambda: float
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        x = x.float()
-        y = y.float()
+        if ridge_lambda < 0:
+            raise ValueError("ridge_lambda must be non-negative")
+        if x.ndim != 2 or y.ndim != 2 or x.shape[0] != y.shape[0] or x.shape[0] == 0:
+            raise ValueError("x and y must be non-empty rank-2 tensors with equal rows")
+
+        # Solving (X^T X + lambda I) directly squares the condition number and
+        # can look singular in float32 for real-model KV activations. Express
+        # the same ridge objective as an augmented least-squares problem and
+        # solve it in float64 instead. The final row/column represents the
+        # unregularized affine bias.
+        x = x.to(dtype=torch.float64)
+        y = y.to(dtype=torch.float64)
         ones = torch.ones((x.shape[0], 1), dtype=x.dtype, device=x.device)
         augmented = torch.cat((x, ones), dim=1)
-        identity = torch.eye(augmented.shape[1], dtype=x.dtype, device=x.device)
-        identity[-1, -1] = 0.0
-        coefficients = torch.linalg.solve(
-            augmented.T @ augmented + ridge_lambda * identity,
-            augmented.T @ y,
+        penalty = torch.eye(augmented.shape[1], dtype=x.dtype, device=x.device)
+        penalty[-1, -1] = 0.0
+        design = torch.cat((augmented, ridge_lambda**0.5 * penalty), dim=0)
+        targets = torch.cat(
+            (y, torch.zeros((penalty.shape[0], y.shape[1]), dtype=y.dtype, device=y.device)),
+            dim=0,
         )
+        coefficients = torch.linalg.lstsq(design, targets).solution.float()
         return coefficients[:-1], coefficients[-1]
 
     def fit_pair(
